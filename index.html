@@ -16,28 +16,12 @@
   <body>
     <div id="root"></div>
 
- <script>
+<script>
 (function () {
-  const FORMSPREE_ENDPOINT = "https://formspree.io/f/xbddgpby";
-
-  // ✅ 支持中文按钮文案
-  const SUBMIT_TEXT_RE = /^(submit application|submit|apply|send|提交申请|提交|申请|发送)$/i;
+  const ENDPOINT = "https://formspree.io/f/xbddgpby";
+  const SUBMIT_TEXT_RE = /submit application|提交申请|提交|apply|submit/i;
 
   function clean(s){ return (s||"").toString().trim().replace(/\s+/g," "); }
-  function isValidEmail(s){ return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test((s||"").trim()); }
-
-  function findSubmitButton(clickedEl) {
-    let el = clickedEl;
-    for (let i=0; i<12 && el; i++) {
-      const txt = clean(el.innerText || el.value || "");
-      const aria = clean(el.getAttribute ? el.getAttribute("aria-label") : "");
-      if (txt && SUBMIT_TEXT_RE.test(txt)) return el;
-      if (aria && SUBMIT_TEXT_RE.test(aria)) return el;
-      el = el.parentElement;
-    }
-    return null;
-  }
-
   function isVisible(el){
     if(!el) return false;
     const st = getComputedStyle(el);
@@ -45,94 +29,91 @@
     return el.getClientRects().length>0;
   }
 
-  function labelFor(el){
-    if(el.id){
-      const lab = document.querySelector(`label[for="${CSS.escape(el.id)}"]`);
-      if(lab && clean(lab.innerText)) return clean(lab.innerText);
+  function findSubmitEl(from){
+    let el = from;
+    for(let i=0;i<16 && el;i++){
+      const txt = clean(el.innerText || el.value || "");
+      const aria = clean(el.getAttribute ? el.getAttribute("aria-label") : "");
+      if((txt && SUBMIT_TEXT_RE.test(txt)) || (aria && SUBMIT_TEXT_RE.test(aria))) return el;
+      el = el.parentElement;
     }
-    const near = el.closest && el.closest("label");
-    if(near && clean(near.innerText)) return clean(near.innerText);
-    const aria = el.getAttribute && el.getAttribute("aria-label");
-    if(aria && clean(aria)) return clean(aria);
-    const ph = el.getAttribute && el.getAttribute("placeholder");
-    if(ph && clean(ph)) return clean(ph);
-    const name = el.getAttribute && el.getAttribute("name");
-    if(name && clean(name)) return clean(name);
-    const id = el.id && clean(el.id);
-    if(id) return id;
-    return "";
+    return null;
   }
 
-  function collect(scopeEl){
-    const els = Array.from(scopeEl.querySelectorAll("input, textarea, select, [contenteditable='true']"))
+  function labelKey(el, idx){
+    const n = clean(el.getAttribute && el.getAttribute("name"));
+    const id = clean(el.id);
+    const aria = clean(el.getAttribute && el.getAttribute("aria-label"));
+    const ph = clean(el.getAttribute && el.getAttribute("placeholder"));
+    return n || id || aria || ph || `field_${idx+1}`;
+  }
+
+  function collect(scope){
+    const els = Array.from(scope.querySelectorAll("input, textarea, select, [contenteditable='true']"))
       .filter(isVisible)
       .filter(el => !(el.tagName==="INPUT" && (el.type||"").toLowerCase()==="hidden"))
       .filter(el => !el.disabled);
 
-    const data = {};
+    const out = {};
     els.forEach((el, idx) => {
-      const key = labelFor(el) || `field_${idx+1}`;
+      const key = labelKey(el, idx);
       const tag = (el.tagName||"").toLowerCase();
       const type = ((el.getAttribute && el.getAttribute("type"))||"").toLowerCase();
 
-      if(type==="radio"){ if(el.checked) data[key] = el.value || "on"; return; }
-      if(type==="checkbox"){ data[key] = el.checked ? (el.value||"yes") : "no"; return; }
-      if(tag==="select"){
-        const val = el.value ?? "";
-        const text = (el.selectedOptions && el.selectedOptions[0] && el.selectedOptions[0].text) ? el.selectedOptions[0].text : "";
-        data[key] = text ? `${val} (${text})` : val;
-        return;
-      }
-      if(el.getAttribute && el.getAttribute("contenteditable")==="true"){
-        data[key] = clean(el.innerText);
-        return;
-      }
-      data[key] = el.value ?? "";
+      if(type==="radio"){ if(el.checked) out[key] = el.value || "on"; return; }
+      if(type==="checkbox"){ out[key] = el.checked ? (el.value||"yes") : "no"; return; }
+      if(tag==="select"){ out[key] = el.value ?? ""; return; }
+      if(el.getAttribute && el.getAttribute("contenteditable")==="true"){ out[key] = clean(el.innerText); return; }
+      out[key] = el.value ?? "";
     });
-    return { data, els };
+
+    return out;
   }
 
-  function showInlineMessage(anchorEl, ok, text){
-    // 在按钮附近插入提示条（不依赖 alert）
-    let box = anchorEl.__voyageMsgBox;
+  function showMsg(anchor, ok, text){
+    let box = anchor.__fsBox;
     if(!box){
       box = document.createElement("div");
       box.style.marginTop = "12px";
       box.style.padding = "10px 12px";
       box.style.borderRadius = "10px";
       box.style.fontSize = "14px";
-      box.style.lineHeight = "1.4";
-      box.style.maxWidth = "640px";
       box.style.border = "1px solid rgba(255,255,255,0.15)";
       box.style.background = "rgba(0,0,0,0.35)";
       box.style.color = "#fff";
-      // 插到按钮后面
-      anchorEl.parentElement && anchorEl.parentElement.appendChild(box);
-      anchorEl.__voyageMsgBox = box;
+      anchor.parentElement && anchor.parentElement.appendChild(box);
+      anchor.__fsBox = box;
     }
     box.style.borderColor = ok ? "rgba(34,197,94,0.6)" : "rgba(239,68,68,0.6)";
     box.style.background = ok ? "rgba(34,197,94,0.12)" : "rgba(239,68,68,0.12)";
     box.textContent = text;
   }
 
-  async function postJson(payload){
-    return fetch(FORMSPREE_ENDPOINT, {
-      method: "POST",
-      headers: {
-        "Accept": "application/json",
-        "Content-Type": "application/json"
-      },
-      body: JSON.stringify(payload)
-    });
+  async function post(payload){
+    // 12秒超时，避免卡死
+    const controller = new AbortController();
+    const t = setTimeout(() => controller.abort(), 12000);
+    try{
+      return await fetch(ENDPOINT, {
+        method: "POST",
+        headers: { "Accept": "application/json", "Content-Type":"application/json" },
+        body: JSON.stringify(payload),
+        signal: controller.signal
+      });
+    } finally {
+      clearTimeout(t);
+    }
   }
 
+  // ✅ 关键：用 CAPTURE 阶段拦截，先于 React 的 onClick 运行
   document.addEventListener("click", async (e) => {
-    const submitEl = findSubmitButton(e.target);
+    const submitEl = findSubmitEl(e.target);
     if(!submitEl) return;
 
-    // ✅ 只拦截提交按钮点击，避免“随便点一栏就提交”
+    // ✅ 强制阻断 React 自己的提交逻辑（否则它会一直 Submitting）
     e.preventDefault();
     e.stopPropagation();
+    e.stopImmediatePropagation();
 
     const scope =
       submitEl.closest("[role='dialog']") ||
@@ -141,98 +122,36 @@
       submitEl.closest("div") ||
       document;
 
-    const { data: fields, els } = collect(scope);
+    const fields = collect(scope);
 
-    // 尝试找 email 字段
-    // ✅ 最稳：优先找真实的邮箱输入框，其次在所有字段里“找像邮箱的值”
-function findEmailValue(scopeEl, fields){
-  // 1) 直接找 input[type=email]
-  const emailInput = scopeEl.querySelector("input[type='email']");
-  if (emailInput && clean(emailInput.value)) return clean(emailInput.value);
-
-  // 2) 找 autocomplete=email
-  const autoEmail = scopeEl.querySelector("input[autocomplete='email']");
-  if (autoEmail && clean(autoEmail.value)) return clean(autoEmail.value);
-
-  // 3) 找 name/id/placeholder/aria 包含 email/邮箱 的 input
-  const candidates = Array.from(scopeEl.querySelectorAll("input"))
-    .filter(isVisible)
-    .map(el => {
-      const meta = [
-        el.name, el.id,
-        el.getAttribute("placeholder"),
-        el.getAttribute("aria-label"),
-      ].join(" ").toLowerCase();
-      return { el, meta };
-    })
-    .filter(x => x.meta.includes("email") || x.meta.includes("邮箱"));
-
-  for (const c of candidates){
-    const v = clean(c.el.value);
-    if (v) return v;
-  }
-
-  // 4) 最后兜底：在 fields 的所有 value 里找“长得像邮箱”的
-  const emailLike = /[^\s@]+@[^\s@]+\.[^\s@]+/;
-  for (const v of Object.values(fields)){
-    const s = clean(v);
-    if (emailLike.test(s)) return s.match(emailLike)[0];
-  }
-
-  return "";
-}
-
-const email = findEmailValue(scope, fields);
-
-// ✅ 更宽松但靠谱的校验（trim 后校验）
-if(!isValidEmail(email)){
-  showInlineMessage(submitEl, false, `请填写正确邮箱（例如 name@gmail.com）。当前识别到：${email || "(空)"}`);
-  return;
-}
-
-    showInlineMessage(submitEl, true, "Submitting…");
+    // 给 Formspree 一个 message，避免某些模板校验
+    const message = Object.entries(fields).map(([k,v]) => `${k}: ${v}`).join("\n");
 
     const payload = {
-      email,
-      message,
       ...fields,
+      message,
       _page: location.href,
       _ts: new Date().toISOString(),
       _subject: "New Co-founder Application"
     };
 
+    showMsg(submitEl, true, "Submitting to Formspree…");
+
     try{
-      submitEl.style.pointerEvents = "none";
-
-      const res = await postJson(payload);
+      const res = await post(payload);
       if(res.ok){
-        showInlineMessage(submitEl, true, "✅ Submitted successfully! We’ll get back to you soon.");
-
-        // ✅ 成功后清空输入框
-        els.forEach(el => {
-          if(el.tagName === "INPUT" || el.tagName === "TEXTAREA" || el.tagName === "SELECT"){
-            if(((el.type||"").toLowerCase()==="checkbox") || ((el.type||"").toLowerCase()==="radio")){
-              el.checked = false;
-            } else {
-              el.value = "";
-            }
-            el.dispatchEvent(new Event("input", { bubbles: true }));
-            el.dispatchEvent(new Event("change", { bubbles: true }));
-          } else if(el.getAttribute && el.getAttribute("contenteditable")==="true"){
-            el.innerText = "";
-          }
-        });
-
-      }else{
+        showMsg(submitEl, true, "✅ Submitted successfully! (Formspree 200)");
+      } else {
         const body = await res.json().catch(()=>null);
         console.error("[Formspree] error:", res.status, body);
-        showInlineMessage(submitEl, false, "❌ Submit failed. 请打开 DevTools → Network/Console 查看错误。");
+        showMsg(submitEl, false, `❌ Submit failed (${res.status}). Open DevTools → Network.`);
       }
-    }catch(err){
+    } catch (err) {
       console.error(err);
-      showInlineMessage(submitEl, false, "❌ Submit failed. Please try again.");
-    }finally{
-      submitEl.style.pointerEvents = "";
+      const msg = (err && err.name==="AbortError")
+        ? "❌ Submit timed out (12s). Please try again."
+        : "❌ Submit failed. Please try again.";
+      showMsg(submitEl, false, msg);
     }
   }, true);
 })();
