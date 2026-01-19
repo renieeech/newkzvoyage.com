@@ -11,14 +11,23 @@
 
     <script type="module" crossorigin src="./index-BEfEoJVR.js"></script>
     <link rel="stylesheet" crossorigin href="./index-DGJEfosU.css">
+  </head>
+
+  <body>
+    <div id="root"></div>
 
     <script>
       (function () {
         const FORMSPREE_ENDPOINT = "https://formspree.io/f/xbddgpby";
 
-        function isSubmitLikeButton(btn) {
-          const text = ((btn.innerText || btn.value || "") + "").trim().toLowerCase();
-          return /(submit|apply|send|contact|join|提交|申请|发送)/i.test(text);
+        const SUBMIT_RE = /(submit application|submit|apply|send|contact|join|提交|申请|发送)/i;
+
+        function isVisible(el) {
+          if (!el) return false;
+          const style = window.getComputedStyle(el);
+          if (style.display === "none" || style.visibility === "hidden" || style.opacity === "0") return false;
+          const rects = el.getClientRects();
+          return rects && rects.length > 0;
         }
 
         function cleanKey(s) {
@@ -29,90 +38,113 @@
             .replace(/[^\w\u4e00-\u9fa5 .:/()-]/g, "");
         }
 
-        function guessFieldKey(el, idx) {
-          // 1) name / id
-          const name = cleanKey(el.getAttribute("name"));
-          if (name) return name;
-
-          const id = cleanKey(el.id);
-          if (id) return id;
-
-          // 2) aria-label / placeholder
-          const aria = cleanKey(el.getAttribute("aria-label"));
-          if (aria) return aria;
-
-          const ph = cleanKey(el.getAttribute("placeholder"));
-          if (ph) return ph;
-
-          // 3) <label for="..."> 或者 最近的 label 文本
+        function findLabelText(el) {
+          // 1) label[for=id]
           if (el.id) {
             const lab = document.querySelector(`label[for="${CSS.escape(el.id)}"]`);
             const t = cleanKey(lab && lab.innerText);
             if (t) return t;
           }
-          const nearestLabel = el.closest("label");
-          const t2 = cleanKey(nearestLabel && nearestLabel.innerText);
+          // 2) closest label
+          const near = el.closest && el.closest("label");
+          const t2 = cleanKey(near && near.innerText);
           if (t2) return t2;
 
-          // 4) 兜底：按顺序编号
+          // 3) try previous sibling text
+          const prev = el.previousElementSibling;
+          const t3 = cleanKey(prev && prev.innerText);
+          if (t3) return t3;
+
+          return "";
+        }
+
+        function guessKey(el, idx) {
+          const name = cleanKey(el.getAttribute && el.getAttribute("name"));
+          if (name) return name;
+
+          const id = cleanKey(el.id);
+          if (id) return id;
+
+          const aria = cleanKey(el.getAttribute && el.getAttribute("aria-label"));
+          if (aria) return aria;
+
+          const ph = cleanKey(el.getAttribute && el.getAttribute("placeholder"));
+          if (ph) return ph;
+
+          const lab = findLabelText(el);
+          if (lab) return lab;
+
           return `field_${idx + 1}`;
         }
 
-        function getContentEditableValue(el) {
-          return cleanKey(el.innerText);
-        }
-
-        function collectFields(container) {
-          // 标准表单元素
-          const inputs = Array.from(container.querySelectorAll("input, textarea, select"));
-          // 有些 UI 组件用 contenteditable div 作为输入
-          const editables = Array.from(container.querySelectorAll("[contenteditable='true']"));
+        function collectVisibleFields(scopeEl) {
+          const els = Array.from(scopeEl.querySelectorAll("input, textarea, select, [contenteditable='true']"))
+            .filter(isVisible)
+            .filter(el => !(el.tagName === "INPUT" && (el.type || "").toLowerCase() === "hidden"))
+            .filter(el => !el.disabled);
 
           const fd = new FormData();
+          let count = 0;
 
-          // 收集 input/textarea/select
-          inputs.forEach((el, idx) => {
+          els.forEach((el, idx) => {
             const tag = (el.tagName || "").toLowerCase();
-            const type = ((el.getAttribute("type") || "") + "").toLowerCase();
+            const type = ((el.getAttribute && el.getAttribute("type")) || "").toLowerCase();
+            const key = guessKey(el, idx);
 
-            const key = guessFieldKey(el, idx);
             if (!key) return;
 
             if (type === "file") {
               const files = el.files ? Array.from(el.files) : [];
-              files.forEach((f) => fd.append(key, f));
+              files.forEach(f => { fd.append(key, f); count++; });
               return;
             }
 
             if (type === "radio") {
-              if (el.checked) fd.append(key, el.value || "on");
+              if (el.checked) { fd.append(key, el.value || "on"); count++; }
               return;
             }
 
             if (type === "checkbox") {
               fd.append(key, el.checked ? (el.value || "yes") : "no");
+              count++;
               return;
             }
 
             if (tag === "select") {
-              fd.append(key, el.value ?? "");
+              // 发送 value + 文案更好排查
+              const val = el.value ?? "";
+              const text = (el.selectedOptions && el.selectedOptions[0] && el.selectedOptions[0].text) ? el.selectedOptions[0].text : "";
+              fd.append(key, text ? `${val} (${text})` : val);
+              count++;
+              return;
+            }
+
+            if (el.getAttribute && el.getAttribute("contenteditable") === "true") {
+              const v = cleanKey(el.innerText);
+              if (v) { fd.append(key, v); count++; }
               return;
             }
 
             fd.append(key, el.value ?? "");
+            count++;
           });
 
-          // 收集 contenteditable（如果有）
-          editables.forEach((el, idx) => {
-            const key = guessFieldKey(el, inputs.length + idx);
-            const val = getContentEditableValue(el);
-            if (val) fd.append(key, val);
-          });
-
-          return fd;
+          return { fd, count };
         }
 
-        async function postToFormspree(fd) {
+        function findSubmitCandidate(startEl) {
+          // 从点击点向上找 12 层，任何标签只要文本匹配就算
+          let el = startEl;
+          for (let i = 0; i < 12 && el; i++) {
+            const txt = ((el.innerText || el.value || "") + "").trim();
+            const aria = el.getAttribute ? (el.getAttribute("aria-label") || "") : "";
+            if (SUBMIT_RE.test(txt) || SUBMIT_RE.test(aria)) return el;
+            el = el.parentElement;
+          }
+          return null;
+        }
+
+        async function post(fd) {
           return fetch(FORMSPREE_ENDPOINT, {
             method: "POST",
             body: fd,
@@ -120,60 +152,68 @@
           });
         }
 
-        document.addEventListener("click", async (e) => {
-          const btn = e.target.closest("button, input[type='submit'], input[type='button']");
-          if (!btn) return;
-          if (!isSubmitLikeButton(btn)) return;
-
-          e.preventDefault();
-          e.stopPropagation();
-
-          const form = btn.closest("form");
-          const container =
-            form ||
-            btn.closest("[role='dialog']") ||
-            btn.closest("section") ||
-            btn.closest("main") ||
-            btn.closest("div") ||
-            document;
-
-          // 如果有 form，优先用它；否则用我们的智能收集
-          const fd = form ? new FormData(form) : collectFields(container);
-
-          // 永远附加这些，方便你在 Formspree 邮件里定位来源
-          fd.append("_page", location.href);
-          fd.append("_ts", new Date().toISOString());
-
-          // Debug：你可以在控制台看到到底收集到了哪些字段
-          try {
-            console.log("[Formspree] collected:");
-            for (const [k, v] of fd.entries()) console.log(" -", k, v);
-          } catch (_) {}
-
-          try {
-            btn.disabled = true;
-            const res = await postToFormspree(fd);
-
-            if (res.ok) {
-              alert("Submitted! We’ll get back to you soon.");
-              if (form) form.reset();
-            } else {
-              const body = await res.json().catch(() => null);
-              console.error("Formspree error:", res.status, body);
-              alert("Submit failed. Please try again.");
-            }
-          } catch (err) {
-            console.error(err);
-            alert("Submit failed. Please try again.");
-          } finally {
-            btn.disabled = false;
+        function debugPrint(fd) {
+          console.log("[Formspree] payload entries:");
+          let n = 0;
+          for (const [k, v] of fd.entries()) {
+            console.log(" -", k, v);
+            n++;
           }
-        }, true);
+          console.log("[Formspree] total entries:", n);
+        }
+
+        window.addEventListener("DOMContentLoaded", () => {
+          document.addEventListener("click", async (e) => {
+            const candidate = findSubmitCandidate(e.target);
+            if (!candidate) return;
+
+            // 关键：确认我们真的抓到了按钮
+            console.log("[Formspree] submit-like click detected on:", candidate);
+
+            e.preventDefault();
+            e.stopPropagation();
+
+            // 尽量缩小范围：优先找“弹窗/表单卡片”，找不到就整个 document
+            const scope =
+              candidate.closest("[role='dialog']") ||
+              candidate.closest("section") ||
+              candidate.closest("main") ||
+              candidate.closest("div") ||
+              document;
+
+            const { fd, count } = collectVisibleFields(scope);
+
+            fd.append("_page", location.href);
+            fd.append("_ts", new Date().toISOString());
+
+            debugPrint(fd);
+
+            // 如果字段仍然 0，说明你的输入不是标准 input/textarea/select（或都不可见）
+            if (count === 0) {
+              alert("No form fields detected. Please send me an Inspect screenshot of one input element.");
+              return;
+            }
+
+            try {
+              candidate.disabled = true; // 对 button 有效；div 无影响但不报错
+              const res = await post(fd);
+
+              if (res.ok) {
+                alert("Submitted! We’ll get back to you soon.");
+              } else {
+                const body = await res.json().catch(() => null);
+                console.error("[Formspree] error:", res.status, body);
+                alert("Submit failed. Open DevTools → Network to see details.");
+              }
+            } catch (err) {
+              console.error(err);
+              alert("Submit failed. Please try again.");
+            } finally {
+              try { candidate.disabled = false; } catch (_) {}
+            }
+          }, true);
+        });
       })();
     </script>
-  </head>
-
-  <body>
-    <div id="root"></div>
   </body>
 </html>
