@@ -144,26 +144,51 @@
     const { data: fields, els } = collect(scope);
 
     // 尝试找 email 字段
-    const email =
-      clean(fields.email) ||
-      clean(fields.Email) ||
-      clean(fields["邮箱"]) ||
-      clean(fields["Email Address"]) ||
-      clean(fields["email address"]) ||
-      "";
+    // ✅ 最稳：优先找真实的邮箱输入框，其次在所有字段里“找像邮箱的值”
+function findEmailValue(scopeEl, fields){
+  // 1) 直接找 input[type=email]
+  const emailInput = scopeEl.querySelector("input[type='email']");
+  if (emailInput && clean(emailInput.value)) return clean(emailInput.value);
 
-    // 拼一个 message，避免 Formspree 422 / 邮件空
-    const message =
-      clean(fields.message) ||
-      clean(fields.Message) ||
-      Object.entries(fields)
-        .map(([k,v]) => `${k}: ${v}`)
-        .join("\n");
+  // 2) 找 autocomplete=email
+  const autoEmail = scopeEl.querySelector("input[autocomplete='email']");
+  if (autoEmail && clean(autoEmail.value)) return clean(autoEmail.value);
 
-    if(!isValidEmail(email)){
-      showInlineMessage(submitEl, false, "请先填写正确的邮箱（例如 name@gmail.com）再提交。");
-      return;
-    }
+  // 3) 找 name/id/placeholder/aria 包含 email/邮箱 的 input
+  const candidates = Array.from(scopeEl.querySelectorAll("input"))
+    .filter(isVisible)
+    .map(el => {
+      const meta = [
+        el.name, el.id,
+        el.getAttribute("placeholder"),
+        el.getAttribute("aria-label"),
+      ].join(" ").toLowerCase();
+      return { el, meta };
+    })
+    .filter(x => x.meta.includes("email") || x.meta.includes("邮箱"));
+
+  for (const c of candidates){
+    const v = clean(c.el.value);
+    if (v) return v;
+  }
+
+  // 4) 最后兜底：在 fields 的所有 value 里找“长得像邮箱”的
+  const emailLike = /[^\s@]+@[^\s@]+\.[^\s@]+/;
+  for (const v of Object.values(fields)){
+    const s = clean(v);
+    if (emailLike.test(s)) return s.match(emailLike)[0];
+  }
+
+  return "";
+}
+
+const email = findEmailValue(scope, fields);
+
+// ✅ 更宽松但靠谱的校验（trim 后校验）
+if(!isValidEmail(email)){
+  showInlineMessage(submitEl, false, `请填写正确邮箱（例如 name@gmail.com）。当前识别到：${email || "(空)"}`);
+  return;
+}
 
     showInlineMessage(submitEl, true, "Submitting…");
 
