@@ -2,14 +2,139 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
-        <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Voyage — Co-founding the Future</title>
+
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+
     <script type="module" crossorigin src="./index-BEfEoJVR.js"></script>
     <link rel="stylesheet" crossorigin href="./index-DGJEfosU.css">
+
+    <script>
+      (function () {
+        // ✅ 你的 Formspree endpoint（保持不变）
+        const FORMSPREE_ENDPOINT = "https://formspree.io/f/xbddgpby";
+
+        // 识别哪些按钮算“提交”
+        function isSubmitLikeButton(btn) {
+          const text = ((btn.innerText || btn.value || "") + "").trim().toLowerCase();
+          return /(submit|apply|send|contact|join|提交|申请|发送)/i.test(text);
+        }
+
+        // 收集一个容器内所有 input/textarea/select 的值
+        function collectFields(container) {
+          const els = Array.from(container.querySelectorAll("input, textarea, select"));
+          const fd = new FormData();
+
+          for (const el of els) {
+            // 优先用 name，其次 id；都没有就跳过（因为 Formspree 需要 key）
+            const key = (el.getAttribute("name") || el.id || "").trim();
+            if (!key) continue;
+
+            const tag = (el.tagName || "").toLowerCase();
+            const type = ((el.getAttribute("type") || "") + "").toLowerCase();
+
+            // file
+            if (type === "file") {
+              const files = el.files ? Array.from(el.files) : [];
+              for (const f of files) fd.append(key, f);
+              continue;
+            }
+
+            // checkbox
+            if (type === "checkbox") {
+              fd.append(key, el.checked ? (el.value || "yes") : "no");
+              continue;
+            }
+
+            // radio
+            if (type === "radio") {
+              if (el.checked) fd.append(key, el.value || "on");
+              continue;
+            }
+
+            // select / textarea / input
+            if (tag === "select") {
+              fd.append(key, el.value ?? "");
+              continue;
+            }
+
+            fd.append(key, el.value ?? "");
+          }
+
+          return fd;
+        }
+
+        async function postToFormspree(fd) {
+          // Formspree 推荐 Accept: application/json，这样错误信息更清晰
+          const res = await fetch(FORMSPREE_ENDPOINT, {
+            method: "POST",
+            body: fd,
+            headers: { "Accept": "application/json" },
+          });
+          return res;
+        }
+
+        // 捕获所有点击（用 capture=true 防止 React 自己的逻辑吞掉）
+        document.addEventListener(
+          "click",
+          async (e) => {
+            const btn = e.target.closest("button, input[type='submit'], input[type='button']");
+            if (!btn) return;
+            if (!isSubmitLikeButton(btn)) return;
+
+            // 阻止页面原逻辑（否则可能跳转/刷新/什么都不做）
+            e.preventDefault();
+            e.stopPropagation();
+
+            // 优先找 form；找不到就用离按钮最近的 section/div 作为“表单区域”
+            const form = btn.closest("form");
+            const container =
+              form ||
+              btn.closest("[role='dialog']") ||
+              btn.closest("section") ||
+              btn.closest("main") ||
+              btn.closest("div") ||
+              document;
+
+            const fd = form ? new FormData(form) : collectFields(container);
+
+            // 附加一些有用信息（邮件里能看到来源页面）
+            fd.append("_page", location.href);
+            fd.append("_ts", new Date().toISOString());
+
+            // 如果你希望邮件标题固定，可以加 subject（Formspree 支持）
+            // fd.append("_subject", "New Application from kzvoyage.com");
+
+            try {
+              btn.disabled = true;
+
+              const res = await postToFormspree(fd);
+
+              if (res.ok) {
+                alert("Submitted! We’ll get back to you soon.");
+                // 尝试重置（如果有 form）
+                if (form) form.reset();
+              } else {
+                const body = await res.json().catch(() => null);
+                console.error("Formspree error:", res.status, body);
+                alert("Submit failed. Please check required fields and try again.");
+              }
+            } catch (err) {
+              console.error(err);
+              alert("Submit failed. Please try again.");
+            } finally {
+              btn.disabled = false;
+            }
+          },
+          true
+        );
+      })();
+    </script>
   </head>
+
   <body>
     <div id="root"></div>
   </body>
