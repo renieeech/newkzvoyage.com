@@ -16,187 +16,201 @@
   <body>
     <div id="root"></div>
 
-    <script>
-      (function () {
-        const FORMSPREE_ENDPOINT = "https://formspree.io/f/xbddgpby";
+ <script>
+(function () {
+  const FORMSPREE_ENDPOINT = "https://formspree.io/f/xbddgpby";
 
-        // ✅ 只把这些“提交按钮文案”当作提交
-        const SUBMIT_TEXT_RE = /^(submit application|submit|apply|send|提交|申请|发送)$/i;
+  // ✅ 支持中文按钮文案
+  const SUBMIT_TEXT_RE = /^(submit application|submit|apply|send|提交申请|提交|申请|发送)$/i;
 
-        function isValidEmail(s) {
-          const v = (s || "").trim();
-          // 简单但够用的邮箱校验
-          return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v);
-        }
+  function clean(s){ return (s||"").toString().trim().replace(/\s+/g," "); }
+  function isValidEmail(s){ return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test((s||"").trim()); }
 
-        function isVisible(el) {
-          if (!el) return false;
-          const style = window.getComputedStyle(el);
-          if (style.display === "none" || style.visibility === "hidden") return false;
-          const rects = el.getClientRects();
-          return rects && rects.length > 0;
-        }
+  function findSubmitButton(clickedEl) {
+    let el = clickedEl;
+    for (let i=0; i<12 && el; i++) {
+      const txt = clean(el.innerText || el.value || "");
+      const aria = clean(el.getAttribute ? el.getAttribute("aria-label") : "");
+      if (txt && SUBMIT_TEXT_RE.test(txt)) return el;
+      if (aria && SUBMIT_TEXT_RE.test(aria)) return el;
+      el = el.parentElement;
+    }
+    return null;
+  }
 
-        function clean(s) {
-          return (s || "").toString().trim().replace(/\s+/g, " ");
-        }
+  function isVisible(el){
+    if(!el) return false;
+    const st = getComputedStyle(el);
+    if(st.display==="none" || st.visibility==="hidden" || st.opacity==="0") return false;
+    return el.getClientRects().length>0;
+  }
 
-        function labelFor(el) {
-          if (el.id) {
-            const lab = document.querySelector(`label[for="${CSS.escape(el.id)}"]`);
-            if (lab && clean(lab.innerText)) return clean(lab.innerText);
-          }
-          const near = el.closest && el.closest("label");
-          if (near && clean(near.innerText)) return clean(near.innerText);
-          const aria = el.getAttribute && el.getAttribute("aria-label");
-          if (aria && clean(aria)) return clean(aria);
-          const ph = el.getAttribute && el.getAttribute("placeholder");
-          if (ph && clean(ph)) return clean(ph);
-          const name = el.getAttribute && el.getAttribute("name");
-          if (name && clean(name)) return clean(name);
-          const id = el.id && clean(el.id);
-          if (id) return id;
-          return "";
-        }
+  function labelFor(el){
+    if(el.id){
+      const lab = document.querySelector(`label[for="${CSS.escape(el.id)}"]`);
+      if(lab && clean(lab.innerText)) return clean(lab.innerText);
+    }
+    const near = el.closest && el.closest("label");
+    if(near && clean(near.innerText)) return clean(near.innerText);
+    const aria = el.getAttribute && el.getAttribute("aria-label");
+    if(aria && clean(aria)) return clean(aria);
+    const ph = el.getAttribute && el.getAttribute("placeholder");
+    if(ph && clean(ph)) return clean(ph);
+    const name = el.getAttribute && el.getAttribute("name");
+    if(name && clean(name)) return clean(name);
+    const id = el.id && clean(el.id);
+    if(id) return id;
+    return "";
+  }
 
-        // 收集当前卡片/弹窗内所有可见字段
-        function collect(scopeEl) {
-          const els = Array.from(scopeEl.querySelectorAll("input, textarea, select, [contenteditable='true']"))
-            .filter(isVisible)
-            .filter(el => !(el.tagName === "INPUT" && (el.type || "").toLowerCase() === "hidden"))
-            .filter(el => !el.disabled);
+  function collect(scopeEl){
+    const els = Array.from(scopeEl.querySelectorAll("input, textarea, select, [contenteditable='true']"))
+      .filter(isVisible)
+      .filter(el => !(el.tagName==="INPUT" && (el.type||"").toLowerCase()==="hidden"))
+      .filter(el => !el.disabled);
 
-          const data = {};
-          els.forEach((el, idx) => {
-            const key = labelFor(el) || `field_${idx + 1}`;
-            const tag = (el.tagName || "").toLowerCase();
-            const type = ((el.getAttribute && el.getAttribute("type")) || "").toLowerCase();
+    const data = {};
+    els.forEach((el, idx) => {
+      const key = labelFor(el) || `field_${idx+1}`;
+      const tag = (el.tagName||"").toLowerCase();
+      const type = ((el.getAttribute && el.getAttribute("type"))||"").toLowerCase();
 
-            if (type === "radio") {
-              if (el.checked) data[key] = el.value || "on";
-              return;
-            }
+      if(type==="radio"){ if(el.checked) data[key] = el.value || "on"; return; }
+      if(type==="checkbox"){ data[key] = el.checked ? (el.value||"yes") : "no"; return; }
+      if(tag==="select"){
+        const val = el.value ?? "";
+        const text = (el.selectedOptions && el.selectedOptions[0] && el.selectedOptions[0].text) ? el.selectedOptions[0].text : "";
+        data[key] = text ? `${val} (${text})` : val;
+        return;
+      }
+      if(el.getAttribute && el.getAttribute("contenteditable")==="true"){
+        data[key] = clean(el.innerText);
+        return;
+      }
+      data[key] = el.value ?? "";
+    });
+    return { data, els };
+  }
 
-            if (type === "checkbox") {
-              data[key] = el.checked ? (el.value || "yes") : "no";
-              return;
-            }
+  function showInlineMessage(anchorEl, ok, text){
+    // 在按钮附近插入提示条（不依赖 alert）
+    let box = anchorEl.__voyageMsgBox;
+    if(!box){
+      box = document.createElement("div");
+      box.style.marginTop = "12px";
+      box.style.padding = "10px 12px";
+      box.style.borderRadius = "10px";
+      box.style.fontSize = "14px";
+      box.style.lineHeight = "1.4";
+      box.style.maxWidth = "640px";
+      box.style.border = "1px solid rgba(255,255,255,0.15)";
+      box.style.background = "rgba(0,0,0,0.35)";
+      box.style.color = "#fff";
+      // 插到按钮后面
+      anchorEl.parentElement && anchorEl.parentElement.appendChild(box);
+      anchorEl.__voyageMsgBox = box;
+    }
+    box.style.borderColor = ok ? "rgba(34,197,94,0.6)" : "rgba(239,68,68,0.6)";
+    box.style.background = ok ? "rgba(34,197,94,0.12)" : "rgba(239,68,68,0.12)";
+    box.textContent = text;
+  }
 
-            if (tag === "select") {
-              const val = el.value ?? "";
-              const text = (el.selectedOptions && el.selectedOptions[0] && el.selectedOptions[0].text) ? el.selectedOptions[0].text : "";
-              data[key] = text ? `${val} (${text})` : val;
-              return;
-            }
+  async function postJson(payload){
+    return fetch(FORMSPREE_ENDPOINT, {
+      method: "POST",
+      headers: {
+        "Accept": "application/json",
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify(payload)
+    });
+  }
 
-            if (el.getAttribute && el.getAttribute("contenteditable") === "true") {
-              data[key] = clean(el.innerText);
-              return;
-            }
+  document.addEventListener("click", async (e) => {
+    const submitEl = findSubmitButton(e.target);
+    if(!submitEl) return;
 
-            data[key] = el.value ?? "";
-          });
+    // ✅ 只拦截提交按钮点击，避免“随便点一栏就提交”
+    e.preventDefault();
+    e.stopPropagation();
 
-          return data;
-        }
+    const scope =
+      submitEl.closest("[role='dialog']") ||
+      submitEl.closest("section") ||
+      submitEl.closest("main") ||
+      submitEl.closest("div") ||
+      document;
 
-        // ✅ 只认“真正的提交按钮”
-        function findRealSubmitButton(clickedEl) {
-          let el = clickedEl;
-          for (let i = 0; i < 12 && el; i++) {
-            const txt = clean(el.innerText || el.value || "");
-            // 必须文本完全匹配（避免你点任何区域都触发）
-            if (txt && SUBMIT_TEXT_RE.test(txt)) return el;
-            // 也允许 aria-label 完全匹配
-            const aria = clean(el.getAttribute ? el.getAttribute("aria-label") : "");
-            if (aria && SUBMIT_TEXT_RE.test(aria)) return el;
-            el = el.parentElement;
-          }
-          return null;
-        }
+    const { data: fields, els } = collect(scope);
 
-        async function postJson(payload) {
-          const res = await fetch(FORMSPREE_ENDPOINT, {
-            method: "POST",
-            headers: {
-              "Accept": "application/json",
-              "Content-Type": "application/json",
-            },
-            body: JSON.stringify(payload),
-          });
-          return res;
-        }
+    // 尝试找 email 字段
+    const email =
+      clean(fields.email) ||
+      clean(fields.Email) ||
+      clean(fields["邮箱"]) ||
+      clean(fields["Email Address"]) ||
+      clean(fields["email address"]) ||
+      "";
 
-        document.addEventListener("click", async (e) => {
-          const submitEl = findRealSubmitButton(e.target);
-          if (!submitEl) return;
+    // 拼一个 message，避免 Formspree 422 / 邮件空
+    const message =
+      clean(fields.message) ||
+      clean(fields.Message) ||
+      Object.entries(fields)
+        .map(([k,v]) => `${k}: ${v}`)
+        .join("\n");
 
-          e.preventDefault();
-          e.stopPropagation();
+    if(!isValidEmail(email)){
+      showInlineMessage(submitEl, false, "请先填写正确的邮箱（例如 name@gmail.com）再提交。");
+      return;
+    }
 
-          // 作用域：优先找对话框/卡片容器
-          const scope =
-            submitEl.closest("[role='dialog']") ||
-            submitEl.closest("section") ||
-            submitEl.closest("main") ||
-            submitEl.closest("div") ||
-            document;
+    showInlineMessage(submitEl, true, "Submitting…");
 
-          const fields = collect(scope);
+    const payload = {
+      email,
+      message,
+      ...fields,
+      _page: location.href,
+      _ts: new Date().toISOString(),
+      _subject: "New Co-founder Application"
+    };
 
-          // 从 fields 里尽量找 email
-          const emailCandidates = [
-            fields.email, fields.Email, fields["E-mail"], fields["Email Address"], fields["email address"],
-            fields["Your email"], fields["Your Email"]
-          ].map(v => clean(v)).filter(Boolean);
+    try{
+      submitEl.style.pointerEvents = "none";
 
-          const email = emailCandidates[0] || "";
-          // message：把关键长文本拼起来（避免 422）
-          const message = [
-            fields.message, fields.Message,
-            fields["What are you building? (Optional)"],
-            fields["What are you building?"],
-            fields["Why Voyage? (Optional)"],
-            fields["Why Voyage?"],
-          ].map(v => clean(v)).filter(Boolean).join("\n\n");
+      const res = await postJson(payload);
+      if(res.ok){
+        showInlineMessage(submitEl, true, "✅ Submitted successfully! We’ll get back to you soon.");
 
-          // ✅ 如果没有合法邮箱，就不提交（避免 422）
-          if (!isValidEmail(email)) {
-            alert("Please enter a valid email address before submitting.");
-            return;
-          }
-
-          const payload = {
-            email,
-            message: message || "(no message)",
-            // 附加所有字段（Formspree 会一起发到邮件里）
-            ...fields,
-            _page: location.href,
-            _ts: new Date().toISOString(),
-            _subject: "New Co-founder Application",
-          };
-
-          console.log("[Formspree] payload preview:", payload);
-
-          try {
-            submitEl.style.pointerEvents = "none";
-
-            const res = await postJson(payload);
-            if (res.ok) {
-              alert("Submitted! We’ll get back to you soon.");
+        // ✅ 成功后清空输入框
+        els.forEach(el => {
+          if(el.tagName === "INPUT" || el.tagName === "TEXTAREA" || el.tagName === "SELECT"){
+            if(((el.type||"").toLowerCase()==="checkbox") || ((el.type||"").toLowerCase()==="radio")){
+              el.checked = false;
             } else {
-              const body = await res.json().catch(() => null);
-              console.error("[Formspree] error:", res.status, body);
-              alert("Submit failed. Please open DevTools → Network/Console for details.");
+              el.value = "";
             }
-          } catch (err) {
-            console.error(err);
-            alert("Submit failed. Please try again.");
-          } finally {
-            submitEl.style.pointerEvents = "";
+            el.dispatchEvent(new Event("input", { bubbles: true }));
+            el.dispatchEvent(new Event("change", { bubbles: true }));
+          } else if(el.getAttribute && el.getAttribute("contenteditable")==="true"){
+            el.innerText = "";
           }
-        }, true);
-      })();
-    </script>
+        });
+
+      }else{
+        const body = await res.json().catch(()=>null);
+        console.error("[Formspree] error:", res.status, body);
+        showInlineMessage(submitEl, false, "❌ Submit failed. 请打开 DevTools → Network/Console 查看错误。");
+      }
+    }catch(err){
+      console.error(err);
+      showInlineMessage(submitEl, false, "❌ Submit failed. Please try again.");
+    }finally{
+      submitEl.style.pointerEvents = "";
+    }
+  }, true);
+})();
+</script>
   </body>
 </html>
