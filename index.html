@@ -19,7 +19,12 @@
 <script>
 (function () {
   const ENDPOINT = "https://formspree.io/f/xbddgpby";
-  const SUBMIT_TEXT_RE = /submit application|提交申请|提交|apply|submit/i;
+  const SUBMIT_TEXT_RE = /^(submit application|提交申请|submit|apply|提交|申请|发送)$/i;
+
+  // ✅ 全局防抖锁：一次提交未结束前，禁止第二次
+  let submitting = false;
+  let lastSubmitAt = 0;
+  const COOLDOWN_MS = 4000; // 4秒内重复点击直接忽略
 
   function clean(s){ return (s||"").toString().trim().replace(/\s+/g," "); }
   function isVisible(el){
@@ -34,13 +39,15 @@
     for(let i=0;i<16 && el;i++){
       const txt = clean(el.innerText || el.value || "");
       const aria = clean(el.getAttribute ? el.getAttribute("aria-label") : "");
-      if((txt && SUBMIT_TEXT_RE.test(txt)) || (aria && SUBMIT_TEXT_RE.test(aria))) return el;
+      // ✅ 必须“完全匹配”按钮文字，避免点到容器也触发
+      if(txt && SUBMIT_TEXT_RE.test(txt)) return el;
+      if(aria && SUBMIT_TEXT_RE.test(aria)) return el;
       el = el.parentElement;
     }
     return null;
   }
 
-  function labelKey(el, idx){
+  function keyFor(el, idx){
     const n = clean(el.getAttribute && el.getAttribute("name"));
     const id = clean(el.id);
     const aria = clean(el.getAttribute && el.getAttribute("aria-label"));
@@ -56,7 +63,7 @@
 
     const out = {};
     els.forEach((el, idx) => {
-      const key = labelKey(el, idx);
+      const key = keyFor(el, idx);
       const tag = (el.tagName||"").toLowerCase();
       const type = ((el.getAttribute && el.getAttribute("type"))||"").toLowerCase();
 
@@ -70,6 +77,7 @@
     return out;
   }
 
+  // ✅ 只显示一个提示条（重复点击不再新增）
   function showMsg(anchor, ok, text){
     let box = anchor.__fsBox;
     if(!box){
@@ -90,13 +98,12 @@
   }
 
   async function post(payload){
-    // 12秒超时，避免卡死
     const controller = new AbortController();
     const t = setTimeout(() => controller.abort(), 12000);
     try{
       return await fetch(ENDPOINT, {
         method: "POST",
-        headers: { "Accept": "application/json", "Content-Type":"application/json" },
+        headers: { "Accept":"application/json", "Content-Type":"application/json" },
         body: JSON.stringify(payload),
         signal: controller.signal
       });
@@ -105,15 +112,24 @@
     }
   }
 
-  // ✅ 关键：用 CAPTURE 阶段拦截，先于 React 的 onClick 运行
+  // ✅ 捕获阶段拦截，且阻断 React 自己的提交
   document.addEventListener("click", async (e) => {
     const submitEl = findSubmitEl(e.target);
     if(!submitEl) return;
 
-    // ✅ 强制阻断 React 自己的提交逻辑（否则它会一直 Submitting）
+    // 防止一次点击冒泡/组合事件触发多次：只处理“第一次”
+    if (e.detail && e.detail > 1) return; // 双击/连点
+    const now = Date.now();
+    if (submitting) return;
+    if (now - lastSubmitAt < COOLDOWN_MS) return;
+
+    // 强制阻断页面原逻辑
     e.preventDefault();
     e.stopPropagation();
     e.stopImmediatePropagation();
+
+    submitting = true;
+    lastSubmitAt = now;
 
     const scope =
       submitEl.closest("[role='dialog']") ||
@@ -124,12 +140,16 @@
 
     const fields = collect(scope);
 
-    // 给 Formspree 一个 message，避免某些模板校验
+    // 给 formspree 一个 message 便于阅读
     const message = Object.entries(fields).map(([k,v]) => `${k}: ${v}`).join("\n");
+
+    // ✅ 加一个本地“幂等ID”，你在 Formspree 里可用来识别重复（必要时也可过滤）
+    const submission_id = `${Date.now()}-${Math.random().toString(16).slice(2)}`;
 
     const payload = {
       ...fields,
       message,
+      submission_id,
       _page: location.href,
       _ts: new Date().toISOString(),
       _subject: "New Co-founder Application"
@@ -138,13 +158,15 @@
     showMsg(submitEl, true, "Submitting to Formspree…");
 
     try{
+      submitEl.style.pointerEvents = "none";
+
       const res = await post(payload);
       if(res.ok){
-        showMsg(submitEl, true, "✅ Submitted successfully! (Formspree 200)");
+        showMsg(submitEl, true, "✅ Submitted successfully!");
       } else {
         const body = await res.json().catch(()=>null);
         console.error("[Formspree] error:", res.status, body);
-        showMsg(submitEl, false, `❌ Submit failed (${res.status}). Open DevTools → Network.`);
+        showMsg(submitEl, false, `❌ Submit failed (${res.status}).`);
       }
     } catch (err) {
       console.error(err);
@@ -152,6 +174,11 @@
         ? "❌ Submit timed out (12s). Please try again."
         : "❌ Submit failed. Please try again.";
       showMsg(submitEl, false, msg);
+    } finally {
+      submitEl.style.pointerEvents = "";
+      submitting = false;
+      // 冷却结束后允许再次提交（避免用户疯狂点）
+      setTimeout(() => { /* no-op, cooldown handled by lastSubmitAt */ }, COOLDOWN_MS);
     }
   }, true);
 })();
