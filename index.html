@@ -14,123 +14,161 @@
 
     <script>
       (function () {
-        // ✅ 你的 Formspree endpoint（保持不变）
         const FORMSPREE_ENDPOINT = "https://formspree.io/f/xbddgpby";
 
-        // 识别哪些按钮算“提交”
         function isSubmitLikeButton(btn) {
           const text = ((btn.innerText || btn.value || "") + "").trim().toLowerCase();
           return /(submit|apply|send|contact|join|提交|申请|发送)/i.test(text);
         }
 
-        // 收集一个容器内所有 input/textarea/select 的值
+        function cleanKey(s) {
+          return (s || "")
+            .toString()
+            .trim()
+            .replace(/\s+/g, " ")
+            .replace(/[^\w\u4e00-\u9fa5 .:/()-]/g, "");
+        }
+
+        function guessFieldKey(el, idx) {
+          // 1) name / id
+          const name = cleanKey(el.getAttribute("name"));
+          if (name) return name;
+
+          const id = cleanKey(el.id);
+          if (id) return id;
+
+          // 2) aria-label / placeholder
+          const aria = cleanKey(el.getAttribute("aria-label"));
+          if (aria) return aria;
+
+          const ph = cleanKey(el.getAttribute("placeholder"));
+          if (ph) return ph;
+
+          // 3) <label for="..."> 或者 最近的 label 文本
+          if (el.id) {
+            const lab = document.querySelector(`label[for="${CSS.escape(el.id)}"]`);
+            const t = cleanKey(lab && lab.innerText);
+            if (t) return t;
+          }
+          const nearestLabel = el.closest("label");
+          const t2 = cleanKey(nearestLabel && nearestLabel.innerText);
+          if (t2) return t2;
+
+          // 4) 兜底：按顺序编号
+          return `field_${idx + 1}`;
+        }
+
+        function getContentEditableValue(el) {
+          return cleanKey(el.innerText);
+        }
+
         function collectFields(container) {
-          const els = Array.from(container.querySelectorAll("input, textarea, select"));
+          // 标准表单元素
+          const inputs = Array.from(container.querySelectorAll("input, textarea, select"));
+          // 有些 UI 组件用 contenteditable div 作为输入
+          const editables = Array.from(container.querySelectorAll("[contenteditable='true']"));
+
           const fd = new FormData();
 
-          for (const el of els) {
-            // 优先用 name，其次 id；都没有就跳过（因为 Formspree 需要 key）
-            const key = (el.getAttribute("name") || el.id || "").trim();
-            if (!key) continue;
-
+          // 收集 input/textarea/select
+          inputs.forEach((el, idx) => {
             const tag = (el.tagName || "").toLowerCase();
             const type = ((el.getAttribute("type") || "") + "").toLowerCase();
 
-            // file
+            const key = guessFieldKey(el, idx);
+            if (!key) return;
+
             if (type === "file") {
               const files = el.files ? Array.from(el.files) : [];
-              for (const f of files) fd.append(key, f);
-              continue;
+              files.forEach((f) => fd.append(key, f));
+              return;
             }
 
-            // checkbox
-            if (type === "checkbox") {
-              fd.append(key, el.checked ? (el.value || "yes") : "no");
-              continue;
-            }
-
-            // radio
             if (type === "radio") {
               if (el.checked) fd.append(key, el.value || "on");
-              continue;
+              return;
             }
 
-            // select / textarea / input
+            if (type === "checkbox") {
+              fd.append(key, el.checked ? (el.value || "yes") : "no");
+              return;
+            }
+
             if (tag === "select") {
               fd.append(key, el.value ?? "");
-              continue;
+              return;
             }
 
             fd.append(key, el.value ?? "");
-          }
+          });
+
+          // 收集 contenteditable（如果有）
+          editables.forEach((el, idx) => {
+            const key = guessFieldKey(el, inputs.length + idx);
+            const val = getContentEditableValue(el);
+            if (val) fd.append(key, val);
+          });
 
           return fd;
         }
 
         async function postToFormspree(fd) {
-          // Formspree 推荐 Accept: application/json，这样错误信息更清晰
-          const res = await fetch(FORMSPREE_ENDPOINT, {
+          return fetch(FORMSPREE_ENDPOINT, {
             method: "POST",
             body: fd,
             headers: { "Accept": "application/json" },
           });
-          return res;
         }
 
-        // 捕获所有点击（用 capture=true 防止 React 自己的逻辑吞掉）
-        document.addEventListener(
-          "click",
-          async (e) => {
-            const btn = e.target.closest("button, input[type='submit'], input[type='button']");
-            if (!btn) return;
-            if (!isSubmitLikeButton(btn)) return;
+        document.addEventListener("click", async (e) => {
+          const btn = e.target.closest("button, input[type='submit'], input[type='button']");
+          if (!btn) return;
+          if (!isSubmitLikeButton(btn)) return;
 
-            // 阻止页面原逻辑（否则可能跳转/刷新/什么都不做）
-            e.preventDefault();
-            e.stopPropagation();
+          e.preventDefault();
+          e.stopPropagation();
 
-            // 优先找 form；找不到就用离按钮最近的 section/div 作为“表单区域”
-            const form = btn.closest("form");
-            const container =
-              form ||
-              btn.closest("[role='dialog']") ||
-              btn.closest("section") ||
-              btn.closest("main") ||
-              btn.closest("div") ||
-              document;
+          const form = btn.closest("form");
+          const container =
+            form ||
+            btn.closest("[role='dialog']") ||
+            btn.closest("section") ||
+            btn.closest("main") ||
+            btn.closest("div") ||
+            document;
 
-            const fd = form ? new FormData(form) : collectFields(container);
+          // 如果有 form，优先用它；否则用我们的智能收集
+          const fd = form ? new FormData(form) : collectFields(container);
 
-            // 附加一些有用信息（邮件里能看到来源页面）
-            fd.append("_page", location.href);
-            fd.append("_ts", new Date().toISOString());
+          // 永远附加这些，方便你在 Formspree 邮件里定位来源
+          fd.append("_page", location.href);
+          fd.append("_ts", new Date().toISOString());
 
-            // 如果你希望邮件标题固定，可以加 subject（Formspree 支持）
-            // fd.append("_subject", "New Application from kzvoyage.com");
+          // Debug：你可以在控制台看到到底收集到了哪些字段
+          try {
+            console.log("[Formspree] collected:");
+            for (const [k, v] of fd.entries()) console.log(" -", k, v);
+          } catch (_) {}
 
-            try {
-              btn.disabled = true;
+          try {
+            btn.disabled = true;
+            const res = await postToFormspree(fd);
 
-              const res = await postToFormspree(fd);
-
-              if (res.ok) {
-                alert("Submitted! We’ll get back to you soon.");
-                // 尝试重置（如果有 form）
-                if (form) form.reset();
-              } else {
-                const body = await res.json().catch(() => null);
-                console.error("Formspree error:", res.status, body);
-                alert("Submit failed. Please check required fields and try again.");
-              }
-            } catch (err) {
-              console.error(err);
+            if (res.ok) {
+              alert("Submitted! We’ll get back to you soon.");
+              if (form) form.reset();
+            } else {
+              const body = await res.json().catch(() => null);
+              console.error("Formspree error:", res.status, body);
               alert("Submit failed. Please try again.");
-            } finally {
-              btn.disabled = false;
             }
-          },
-          true
-        );
+          } catch (err) {
+            console.error(err);
+            alert("Submit failed. Please try again.");
+          } finally {
+            btn.disabled = false;
+          }
+        }, true);
       })();
     </script>
   </head>
