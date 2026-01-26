@@ -1,5 +1,26 @@
 <!doctype html>
 <html lang="en">
+  <style>
+  #company-footer{
+    position: fixed;
+    left: 0; right: 0; bottom: 0;
+    padding: 10px 16px;
+    font-family: Inter, system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif;
+    font-size: 12px;
+    line-height: 1.35;
+    color: rgba(255,255,255,0.65);
+    background: rgba(0,0,0,0.28);
+    backdrop-filter: blur(8px);
+    z-index: 9999;
+    text-align: center;
+    pointer-events: none;
+  }
+  #company-footer .line{ opacity: 0.95; }
+  @media (max-width: 640px){
+    #company-footer{ font-size: 11px; padding: 9px 12px; }
+  }
+</style>
+
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
@@ -19,12 +40,13 @@
 <script>
 (function () {
   const ENDPOINT = "https://formspree.io/f/xbddgpby";
-  const SUBMIT_TEXT_RE = /^(submit application|提交申请|submit|apply|提交|申请|发送)$/i;
 
-  // ✅ 全局防抖锁：一次提交未结束前，禁止第二次
+  // ✅ 只认真正“提交”按钮，不要包含 apply
+  const SUBMIT_TEXT_RE = /^(submit application|提交申请)$/i;
+
   let submitting = false;
   let lastSubmitAt = 0;
-  const COOLDOWN_MS = 4000; // 4秒内重复点击直接忽略
+  const COOLDOWN_MS = 4000;
 
   function clean(s){ return (s||"").toString().trim().replace(/\s+/g," "); }
   function isVisible(el){
@@ -39,9 +61,20 @@
     for(let i=0;i<16 && el;i++){
       const txt = clean(el.innerText || el.value || "");
       const aria = clean(el.getAttribute ? el.getAttribute("aria-label") : "");
-      // ✅ 必须“完全匹配”按钮文字，避免点到容器也触发
       if(txt && SUBMIT_TEXT_RE.test(txt)) return el;
       if(aria && SUBMIT_TEXT_RE.test(aria)) return el;
+      el = el.parentElement;
+    }
+    return null;
+  }
+
+  // ✅ 只有按钮附近确实有表单输入框时才认为是“提交”
+  function findFormScope(startEl){
+    let el = startEl;
+    for(let i=0;i<12 && el;i++){
+      const inputs = el.querySelectorAll("input, textarea, select, [contenteditable='true']");
+      const visibleCount = Array.from(inputs).filter(isVisible).length;
+      if(visibleCount >= 2) return el; // 至少2个可见字段，才像一个表单
       el = el.parentElement;
     }
     return null;
@@ -77,7 +110,6 @@
     return out;
   }
 
-  // ✅ 只显示一个提示条（重复点击不再新增）
   function showMsg(anchor, ok, text){
     let box = anchor.__fsBox;
     if(!box){
@@ -112,18 +144,18 @@
     }
   }
 
-  // ✅ 捕获阶段拦截，且阻断 React 自己的提交
   document.addEventListener("click", async (e) => {
     const submitEl = findSubmitEl(e.target);
     if(!submitEl) return;
 
-    // 防止一次点击冒泡/组合事件触发多次：只处理“第一次”
-    if (e.detail && e.detail > 1) return; // 双击/连点
+    const scope = findFormScope(submitEl);
+    if(!scope) return; // ✅ 没有表单字段：大概率是 Apply/导航按钮，不拦截
+
     const now = Date.now();
     if (submitting) return;
     if (now - lastSubmitAt < COOLDOWN_MS) return;
 
-    // 强制阻断页面原逻辑
+    // ✅ 阻断 React 自己的 submit
     e.preventDefault();
     e.stopPropagation();
     e.stopImmediatePropagation();
@@ -131,19 +163,8 @@
     submitting = true;
     lastSubmitAt = now;
 
-    const scope =
-      submitEl.closest("[role='dialog']") ||
-      submitEl.closest("section") ||
-      submitEl.closest("main") ||
-      submitEl.closest("div") ||
-      document;
-
     const fields = collect(scope);
-
-    // 给 formspree 一个 message 便于阅读
     const message = Object.entries(fields).map(([k,v]) => `${k}: ${v}`).join("\n");
-
-    // ✅ 加一个本地“幂等ID”，你在 Formspree 里可用来识别重复（必要时也可过滤）
     const submission_id = `${Date.now()}-${Math.random().toString(16).slice(2)}`;
 
     const payload = {
@@ -159,7 +180,6 @@
 
     try{
       submitEl.style.pointerEvents = "none";
-
       const res = await post(payload);
       if(res.ok){
         showMsg(submitEl, true, "✅ Submitted successfully!");
@@ -177,11 +197,13 @@
     } finally {
       submitEl.style.pointerEvents = "";
       submitting = false;
-      // 冷却结束后允许再次提交（避免用户疯狂点）
-      setTimeout(() => { /* no-op, cooldown handled by lastSubmitAt */ }, COOLDOWN_MS);
     }
   }, true);
 })();
 </script>
+    <footer id="company-footer">
+  <div class="line">VOYAGE HOLDING LIMITED</div>
+  <div class="line">UNIT 10, 17/F HORIZON EAST 1 TSAT PO STREET SAN PO KONG HK</div>
+</footer>
   </body>
 </html>
