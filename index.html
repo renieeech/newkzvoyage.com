@@ -1,26 +1,5 @@
 <!doctype html>
 <html lang="en">
-  <style>
-  #company-footer{
-    position: fixed;
-    left: 0; right: 0; bottom: 0;
-    padding: 10px 16px;
-    font-family: Inter, system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif;
-    font-size: 12px;
-    line-height: 1.35;
-    color: rgba(255,255,255,0.65);
-    background: rgba(0,0,0,0.28);
-    backdrop-filter: blur(8px);
-    z-index: 9999;
-    text-align: center;
-    pointer-events: none;
-  }
-  #company-footer .line{ opacity: 0.95; }
-  @media (max-width: 640px){
-    #company-footer{ font-size: 11px; padding: 9px 12px; }
-  }
-</style>
-
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
@@ -32,178 +11,214 @@
 
     <script type="module" crossorigin src="./index-BEfEoJVR.js"></script>
     <link rel="stylesheet" crossorigin href="./index-DGJEfosU.css">
+
+    <!-- Non-fixed footer style -->
+    <style>
+      #company-footer{
+        margin-top: 64px;
+        padding: 28px 18px;
+        border-top: 1px solid rgba(255,255,255,0.10);
+        font-family: Inter, system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif;
+        font-size: 12px;
+        line-height: 1.5;
+        color: rgba(255,255,255,0.60);
+        text-align: center;
+      }
+      #company-footer .line{
+        opacity: 0.95;
+      }
+      #company-footer .line:first-child{
+        color: rgba(255,255,255,0.75);
+        font-weight: 600;
+        letter-spacing: 0.02em;
+        margin-bottom: 6px;
+      }
+      #company-footer .line:last-child{
+        max-width: 920px;
+        margin: 0 auto;
+      }
+      @media (max-width: 640px){
+        #company-footer{
+          font-size: 11px;
+          padding: 22px 14px;
+          margin-top: 48px;
+        }
+      }
+    </style>
   </head>
 
   <body>
     <div id="root"></div>
 
-<script>
-(function () {
-  const ENDPOINT = "https://formspree.io/f/xbddgpby";
+    <script>
+      (function () {
+        const ENDPOINT = "https://formspree.io/f/xbddgpby";
 
-  // ✅ 只认真正“提交”按钮，不要包含 apply
-  const SUBMIT_TEXT_RE = /^(submit application|提交申请)$/i;
+        // ✅ 只认真正“提交”按钮，不要包含 apply
+        const SUBMIT_TEXT_RE = /^(submit application|提交申请)$/i;
 
-  let submitting = false;
-  let lastSubmitAt = 0;
-  const COOLDOWN_MS = 4000;
+        let submitting = false;
+        let lastSubmitAt = 0;
+        const COOLDOWN_MS = 4000;
 
-  function clean(s){ return (s||"").toString().trim().replace(/\s+/g," "); }
-  function isVisible(el){
-    if(!el) return false;
-    const st = getComputedStyle(el);
-    if(st.display==="none" || st.visibility==="hidden" || st.opacity==="0") return false;
-    return el.getClientRects().length>0;
-  }
+        function clean(s){ return (s||"").toString().trim().replace(/\s+/g," "); }
+        function isVisible(el){
+          if(!el) return false;
+          const st = getComputedStyle(el);
+          if(st.display==="none" || st.visibility==="hidden" || st.opacity==="0") return false;
+          return el.getClientRects().length>0;
+        }
 
-  function findSubmitEl(from){
-    let el = from;
-    for(let i=0;i<16 && el;i++){
-      const txt = clean(el.innerText || el.value || "");
-      const aria = clean(el.getAttribute ? el.getAttribute("aria-label") : "");
-      if(txt && SUBMIT_TEXT_RE.test(txt)) return el;
-      if(aria && SUBMIT_TEXT_RE.test(aria)) return el;
-      el = el.parentElement;
-    }
-    return null;
-  }
+        function findSubmitEl(from){
+          let el = from;
+          for(let i=0;i<16 && el;i++){
+            const txt = clean(el.innerText || el.value || "");
+            const aria = clean(el.getAttribute ? el.getAttribute("aria-label") : "");
+            if(txt && SUBMIT_TEXT_RE.test(txt)) return el;
+            if(aria && SUBMIT_TEXT_RE.test(aria)) return el;
+            el = el.parentElement;
+          }
+          return null;
+        }
 
-  // ✅ 只有按钮附近确实有表单输入框时才认为是“提交”
-  function findFormScope(startEl){
-    let el = startEl;
-    for(let i=0;i<12 && el;i++){
-      const inputs = el.querySelectorAll("input, textarea, select, [contenteditable='true']");
-      const visibleCount = Array.from(inputs).filter(isVisible).length;
-      if(visibleCount >= 2) return el; // 至少2个可见字段，才像一个表单
-      el = el.parentElement;
-    }
-    return null;
-  }
+        // ✅ 只有按钮附近确实有表单输入框时才认为是“提交”
+        function findFormScope(startEl){
+          let el = startEl;
+          for(let i=0;i<12 && el;i++){
+            const inputs = el.querySelectorAll("input, textarea, select, [contenteditable='true']");
+            const visibleCount = Array.from(inputs).filter(isVisible).length;
+            if(visibleCount >= 2) return el; // 至少2个可见字段，才像一个表单
+            el = el.parentElement;
+          }
+          return null;
+        }
 
-  function keyFor(el, idx){
-    const n = clean(el.getAttribute && el.getAttribute("name"));
-    const id = clean(el.id);
-    const aria = clean(el.getAttribute && el.getAttribute("aria-label"));
-    const ph = clean(el.getAttribute && el.getAttribute("placeholder"));
-    return n || id || aria || ph || `field_${idx+1}`;
-  }
+        function keyFor(el, idx){
+          const n = clean(el.getAttribute && el.getAttribute("name"));
+          const id = clean(el.id);
+          const aria = clean(el.getAttribute && el.getAttribute("aria-label"));
+          const ph = clean(el.getAttribute && el.getAttribute("placeholder"));
+          return n || id || aria || ph || `field_${idx+1}`;
+        }
 
-  function collect(scope){
-    const els = Array.from(scope.querySelectorAll("input, textarea, select, [contenteditable='true']"))
-      .filter(isVisible)
-      .filter(el => !(el.tagName==="INPUT" && (el.type||"").toLowerCase()==="hidden"))
-      .filter(el => !el.disabled);
+        function collect(scope){
+          const els = Array.from(scope.querySelectorAll("input, textarea, select, [contenteditable='true']"))
+            .filter(isVisible)
+            .filter(el => !(el.tagName==="INPUT" && (el.type||"").toLowerCase()==="hidden"))
+            .filter(el => !el.disabled);
 
-    const out = {};
-    els.forEach((el, idx) => {
-      const key = keyFor(el, idx);
-      const tag = (el.tagName||"").toLowerCase();
-      const type = ((el.getAttribute && el.getAttribute("type"))||"").toLowerCase();
+          const out = {};
+          els.forEach((el, idx) => {
+            const key = keyFor(el, idx);
+            const tag = (el.tagName||"").toLowerCase();
+            const type = ((el.getAttribute && el.getAttribute("type"))||"").toLowerCase();
 
-      if(type==="radio"){ if(el.checked) out[key] = el.value || "on"; return; }
-      if(type==="checkbox"){ out[key] = el.checked ? (el.value||"yes") : "no"; return; }
-      if(tag==="select"){ out[key] = el.value ?? ""; return; }
-      if(el.getAttribute && el.getAttribute("contenteditable")==="true"){ out[key] = clean(el.innerText); return; }
-      out[key] = el.value ?? "";
-    });
+            if(type==="radio"){ if(el.checked) out[key] = el.value || "on"; return; }
+            if(type==="checkbox"){ out[key] = el.checked ? (el.value||"yes") : "no"; return; }
+            if(tag==="select"){ out[key] = el.value ?? ""; return; }
+            if(el.getAttribute && el.getAttribute("contenteditable")==="true"){ out[key] = clean(el.innerText); return; }
+            out[key] = el.value ?? "";
+          });
 
-    return out;
-  }
+          return out;
+        }
 
-  function showMsg(anchor, ok, text){
-    let box = anchor.__fsBox;
-    if(!box){
-      box = document.createElement("div");
-      box.style.marginTop = "12px";
-      box.style.padding = "10px 12px";
-      box.style.borderRadius = "10px";
-      box.style.fontSize = "14px";
-      box.style.border = "1px solid rgba(255,255,255,0.15)";
-      box.style.background = "rgba(0,0,0,0.35)";
-      box.style.color = "#fff";
-      anchor.parentElement && anchor.parentElement.appendChild(box);
-      anchor.__fsBox = box;
-    }
-    box.style.borderColor = ok ? "rgba(34,197,94,0.6)" : "rgba(239,68,68,0.6)";
-    box.style.background = ok ? "rgba(34,197,94,0.12)" : "rgba(239,68,68,0.12)";
-    box.textContent = text;
-  }
+        function showMsg(anchor, ok, text){
+          let box = anchor.__fsBox;
+          if(!box){
+            box = document.createElement("div");
+            box.style.marginTop = "12px";
+            box.style.padding = "10px 12px";
+            box.style.borderRadius = "10px";
+            box.style.fontSize = "14px";
+            box.style.border = "1px solid rgba(255,255,255,0.15)";
+            box.style.background = "rgba(0,0,0,0.35)";
+            box.style.color = "#fff";
+            anchor.parentElement && anchor.parentElement.appendChild(box);
+            anchor.__fsBox = box;
+          }
+          box.style.borderColor = ok ? "rgba(34,197,94,0.6)" : "rgba(239,68,68,0.6)";
+          box.style.background = ok ? "rgba(34,197,94,0.12)" : "rgba(239,68,68,0.12)";
+          box.textContent = text;
+        }
 
-  async function post(payload){
-    const controller = new AbortController();
-    const t = setTimeout(() => controller.abort(), 12000);
-    try{
-      return await fetch(ENDPOINT, {
-        method: "POST",
-        headers: { "Accept":"application/json", "Content-Type":"application/json" },
-        body: JSON.stringify(payload),
-        signal: controller.signal
-      });
-    } finally {
-      clearTimeout(t);
-    }
-  }
+        async function post(payload){
+          const controller = new AbortController();
+          const t = setTimeout(() => controller.abort(), 12000);
+          try{
+            return await fetch(ENDPOINT, {
+              method: "POST",
+              headers: { "Accept":"application/json", "Content-Type":"application/json" },
+              body: JSON.stringify(payload),
+              signal: controller.signal
+            });
+          } finally {
+            clearTimeout(t);
+          }
+        }
 
-  document.addEventListener("click", async (e) => {
-    const submitEl = findSubmitEl(e.target);
-    if(!submitEl) return;
+        document.addEventListener("click", async (e) => {
+          const submitEl = findSubmitEl(e.target);
+          if(!submitEl) return;
 
-    const scope = findFormScope(submitEl);
-    if(!scope) return; // ✅ 没有表单字段：大概率是 Apply/导航按钮，不拦截
+          const scope = findFormScope(submitEl);
+          if(!scope) return; // ✅ 没有表单字段：大概率是 Apply/导航按钮，不拦截
 
-    const now = Date.now();
-    if (submitting) return;
-    if (now - lastSubmitAt < COOLDOWN_MS) return;
+          const now = Date.now();
+          if (submitting) return;
+          if (now - lastSubmitAt < COOLDOWN_MS) return;
 
-    // ✅ 阻断 React 自己的 submit
-    e.preventDefault();
-    e.stopPropagation();
-    e.stopImmediatePropagation();
+          // ✅ 阻断 React 自己的 submit
+          e.preventDefault();
+          e.stopPropagation();
+          e.stopImmediatePropagation();
 
-    submitting = true;
-    lastSubmitAt = now;
+          submitting = true;
+          lastSubmitAt = now;
 
-    const fields = collect(scope);
-    const message = Object.entries(fields).map(([k,v]) => `${k}: ${v}`).join("\n");
-    const submission_id = `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+          const fields = collect(scope);
+          const message = Object.entries(fields).map(([k,v]) => `${k}: ${v}`).join("\n");
+          const submission_id = `${Date.now()}-${Math.random().toString(16).slice(2)}`;
 
-    const payload = {
-      ...fields,
-      message,
-      submission_id,
-      _page: location.href,
-      _ts: new Date().toISOString(),
-      _subject: "New Co-founder Application"
-    };
+          const payload = {
+            ...fields,
+            message,
+            submission_id,
+            _page: location.href,
+            _ts: new Date().toISOString(),
+            _subject: "New Co-founder Application"
+          };
 
-    showMsg(submitEl, true, "Submitting to Formspree…");
+          showMsg(submitEl, true, "Submitting to Formspree…");
 
-    try{
-      submitEl.style.pointerEvents = "none";
-      const res = await post(payload);
-      if(res.ok){
-        showMsg(submitEl, true, "✅ Submitted successfully!");
-      } else {
-        const body = await res.json().catch(()=>null);
-        console.error("[Formspree] error:", res.status, body);
-        showMsg(submitEl, false, `❌ Submit failed (${res.status}).`);
-      }
-    } catch (err) {
-      console.error(err);
-      const msg = (err && err.name==="AbortError")
-        ? "❌ Submit timed out (12s). Please try again."
-        : "❌ Submit failed. Please try again.";
-      showMsg(submitEl, false, msg);
-    } finally {
-      submitEl.style.pointerEvents = "";
-      submitting = false;
-    }
-  }, true);
-})();
-</script>
+          try{
+            submitEl.style.pointerEvents = "none";
+            const res = await post(payload);
+            if(res.ok){
+              showMsg(submitEl, true, "✅ Submitted successfully!");
+            } else {
+              const body = await res.json().catch(()=>null);
+              console.error("[Formspree] error:", res.status, body);
+              showMsg(submitEl, false, `❌ Submit failed (${res.status}).`);
+            }
+          } catch (err) {
+            console.error(err);
+            const msg = (err && err.name==="AbortError")
+              ? "❌ Submit timed out (12s). Please try again."
+              : "❌ Submit failed. Please try again.";
+            showMsg(submitEl, false, msg);
+          } finally {
+            submitEl.style.pointerEvents = "";
+            submitting = false;
+          }
+        }, true);
+      })();
+    </script>
+
+    <!-- Non-fixed footer (scrolls with page) -->
     <footer id="company-footer">
-  <div class="line">VOYAGE HOLDING LIMITED</div>
-  <div class="line">UNIT 10, 17/F HORIZON EAST 1 TSAT PO STREET SAN PO KONG HK</div>
-</footer>
+      <div class="line">VOYAGE HOLDING LIMITED</div>
+      <div class="line">UNIT 10, 17/F HORIZON EAST 1 TSAT PO STREET SAN PO KONG HK</div>
+    </footer>
   </body>
 </html>
