@@ -12,29 +12,34 @@
     <script type="module" crossorigin src="./index-BEfEoJVR.js"></script>
     <link rel="stylesheet" crossorigin href="./index-DGJEfosU.css">
 
-    <!-- Company info style (injected above existing copyright, or appended at bottom as fallback) -->
+    <!-- ✅ Company info: rendered above the existing copyright line via CSS (no JS injection) -->
     <style>
-      .kz-company-in-footer{
-        margin-top: 12px;
-        padding-top: 10px;
-        color: rgba(255,255,255,0.58);
+      /* Put company info right before the content of the LAST footer on the page */
+      footer:last-of-type::before{
+        content: "VOYAGE HOLDING LIMITED\AUNIT 10, 17/F HORIZON EAST 1 TSAT PO STREET SAN PO KONG HK";
+        white-space: pre-line;
+        display: block;
+        text-align: center;
+        margin: 0 auto 12px;
+        max-width: 920px;
+
         font-family: Inter, system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif;
         font-size: 12px;
-        line-height: 1.55;
-        text-align: center;
-      }
-      .kz-company-in-footer .name{
-        color: rgba(255,255,255,0.78);
-        font-weight: 600;
+        line-height: 1.6;
+        color: rgba(255,255,255,0.60);
         letter-spacing: 0.02em;
-        margin-bottom: 4px;
+
+        /* subtle spacing so it feels integrated, not like a separate block */
+        padding-top: 6px;
       }
-      .kz-company-in-footer .addr{
-        max-width: 920px;
-        margin: 0 auto;
-      }
+
       @media (max-width: 640px){
-        .kz-company-in-footer{ font-size: 11px; }
+        footer:last-of-type::before{
+          font-size: 11px;
+          margin-bottom: 10px;
+          padding-left: 14px;
+          padding-right: 14px;
+        }
       }
     </style>
   </head>
@@ -46,6 +51,8 @@
     <script>
       (function () {
         const ENDPOINT = "https://formspree.io/f/xbddgpby";
+
+        // ✅ only treat these as real submit buttons (DO NOT include "apply")
         const SUBMIT_TEXT_RE = /^(submit application|提交申请)$/i;
 
         let submitting = false;
@@ -72,6 +79,7 @@
           return null;
         }
 
+        // ✅ only intercept when there is a real form nearby
         function findFormScope(startEl){
           let el = startEl;
           for(let i=0;i<12 && el;i++){
@@ -107,6 +115,7 @@
             if(type==="checkbox"){ out[key] = el.checked ? (el.value||"yes") : "no"; return; }
             if(tag==="select"){ out[key] = el.value ?? ""; return; }
             if(el.getAttribute && el.getAttribute("contenteditable")==="true"){ out[key] = clean(el.innerText); return; }
+
             out[key] = el.value ?? "";
           });
 
@@ -158,6 +167,7 @@
           if (submitting) return;
           if (now - lastSubmitAt < COOLDOWN_MS) return;
 
+          // block React's internal handlers for this click
           e.preventDefault();
           e.stopPropagation();
           e.stopImmediatePropagation();
@@ -201,82 +211,6 @@
             submitting = false;
           }
         }, true);
-      })();
-    </script>
-
-    <!-- Robust injection: insert company info ABOVE the existing copyright line; if not found, append at bottom -->
-    <script>
-      (function () {
-        const COMPANY_NAME = "VOYAGE HOLDING LIMITED";
-        const COMPANY_ADDR = "UNIT 10,17/F HORIZON EAST 1 TSAT PO STREET SAN PO KONG HK";
-        const ID = "kz-company-in-footer";
-
-        const BLOCK_HTML = `
-          <div class="kz-company-in-footer" id="${ID}">
-            <div class="name">${COMPANY_NAME}</div>
-            <div class="addr">${COMPANY_ADDR}</div>
-          </div>
-        `;
-
-        function already() { return !!document.getElementById(ID); }
-
-        function createBlock() {
-          const wrap = document.createElement("div");
-          wrap.innerHTML = BLOCK_HTML.trim();
-          return wrap.firstElementChild;
-        }
-
-        function findCopyrightElement() {
-          // 更广的搜索范围：任何元素都可以
-          const nodes = Array.from(document.querySelectorAll("footer, small, p, span, div"));
-          return nodes.find(el => /ALL\s+RIGHTS\s+RESERVED/i.test((el.innerText || el.textContent || ""))) || null;
-        }
-
-        function findFooterContainer() {
-          // 尽量找到页面里“最底部”的 footer 容器
-          const footers = Array.from(document.querySelectorAll("footer"));
-          if (footers.length) return footers[footers.length - 1];
-          // fallback：root
-          return document.getElementById("root") || document.body;
-        }
-
-        function injectOnce() {
-          if (already()) return true;
-
-          const copyrightEl = findCopyrightElement();
-          if (copyrightEl && copyrightEl.parentNode) {
-            const block = createBlock();
-            copyrightEl.parentNode.insertBefore(block, copyrightEl);
-            return true;
-          }
-
-          // 如果暂时找不到版权行，不立刻兜底（让 observer 再等等）
-          return false;
-        }
-
-        function fallbackAppendBottom() {
-          if (already()) return;
-          const container = findFooterContainer();
-          container.appendChild(createBlock());
-        }
-
-        // 先尝试一次
-        if (injectOnce()) return;
-
-        // 监听 DOM 变化，最长等 12 秒
-        const obs = new MutationObserver(() => {
-          if (injectOnce()) {
-            obs.disconnect();
-          }
-        });
-
-        obs.observe(document.documentElement, { childList: true, subtree: true });
-
-        // 12 秒后仍找不到版权行：兜底放在页面最底部（保证不会“没了”）
-        setTimeout(() => {
-          obs.disconnect();
-          if (!already()) fallbackAppendBottom();
-        }, 12000);
       })();
     </script>
   </body>
